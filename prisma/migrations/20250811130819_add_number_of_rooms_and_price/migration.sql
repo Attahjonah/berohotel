@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "public"."RoomType" ADD COLUMN     "numberOfRooms" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "price" DOUBLE PRECISION NOT NULL DEFAULT 0;

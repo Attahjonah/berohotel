@@ -1,9 +1,207 @@
 generator client {
   provider = "prisma-client-js"
-  
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model RoomType {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  description   String?
+  capacity      Int
+  price         Float    @default(0)
+  numberOfRooms Int      @default(0)
+  imageUrl      String? 
+  rooms         Room[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Room {
+  id           String    @id @default(uuid())
+  roomName     String    @unique
+  roomTypeId   String
+  roomType     RoomType  @relation(fields: [roomTypeId], references: [id])
+  isAvailable  Boolean   @default(true)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  bookings     Booking[]
+}
+
+model User {
+  id          String    @id @default(uuid())
+  name        String
+  email       String    @unique
+  phone       String?
+  password    String
+  role        UserRole  @default(GUEST)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  bookings    Booking[]
+}
+
+model Booking {
+  id          String        @id @default(uuid())
+  userId      String
+  roomId      String
+  checkIn     DateTime
+  checkOut    DateTime
+  status      BookingStatus @default(PENDING)
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id])
+  room        Room          @relation(fields: [roomId], references: [id])
+  payments    Payment[]
+}
+
+model Payment {
+  id          String        @id @default(uuid())
+  bookingId   String
+  amount      Float
+  currency    String        @default("NGN")
+  paymentDate DateTime      @default(now())
+  method      PaymentMethod
+  status      PaymentStatus @default(SUCCESS)
+
+  booking     Booking       @relation(fields: [bookingId], references: [id])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  STAFF
+  GUEST
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CARD
+  TRANSFER
+  CASH
+  PAYSTACK
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+
+
+
+
+
+// generator client {
+//   provider = "prisma-client-js"
+// }
+
+// datasource db {
+//   provider = "postgresql"
+//   url      = env("DATABASE_URL")
+// }
+
+// model RoomType {
+//   id            Int      @id @default(autoincrement())
+//   name          String   @unique
+//   description   String?
+//   capacity      Int
+//   price         Float    @default(0) 
+//   numberOfRooms Int      @default(0) 
+//   rooms         Room[]
+
+//   createdAt     DateTime @default(now())
+//   updatedAt     DateTime @updatedAt
+// }
+
+// model Room {
+//   id           Int      @id @default(autoincrement())
+//   roomNumber   String   @unique
+//   roomTypeId   Int
+//   roomType     RoomType @relation(fields: [roomTypeId], references: [id])
+//   isAvailable  Boolean  @default(true)
+
+//   createdAt    DateTime @default(now())
+//   updatedAt    DateTime @updatedAt
+//   bookings     Booking[]
+// }
+
+// model User {
+//   id          Int       @id @default(autoincrement())
+//   name        String
+//   email       String    @unique
+//   phone       String?
+//   password    String
+//   role        UserRole  @default(GUEST)
+
+//   createdAt   DateTime  @default(now())
+//   updatedAt   DateTime  @updatedAt
+//   bookings    Booking[]
+// }
+
+// model Booking {
+//   id          Int           @id @default(autoincrement())
+//   userId      Int
+//   roomId      Int
+//   checkIn     DateTime
+//   checkOut    DateTime
+//   status      BookingStatus @default(PENDING)
+
+//   createdAt   DateTime      @default(now())
+//   updatedAt   DateTime      @updatedAt
+
+//   user        User          @relation(fields: [userId], references: [id])
+//   room        Room          @relation(fields: [roomId], references: [id])
+//   payments    Payment[]
+// }
+
+// model Payment {
+//   id          Int           @id @default(autoincrement())
+//   bookingId   Int
+//   amount      Float
+//   currency    String        @default("NGN")
+//   paymentDate DateTime      @default(now())
+//   method      PaymentMethod
+//   status      PaymentStatus @default(SUCCESS)
+
+//   booking     Booking       @relation(fields: [bookingId], references: [id])
+// }
+
+// enum UserRole {
+//   SUPER_ADMIN
+//   ADMIN
+//   STAFF
+//   GUEST
+// }
+
+// enum BookingStatus {
+//   PENDING
+//   CONFIRMED
+//   CANCELLED
+// }
+
+// enum PaymentMethod {
+//   CARD
+//   TRANSFER
+//   CASH
+//   PAYSTACK
+// }
+
+// enum PaymentStatus {
+//   SUCCESS
+//   FAILED
+//   PENDING
+// }
