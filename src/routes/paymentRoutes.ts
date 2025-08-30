@@ -4,17 +4,20 @@ import {
   confirmManualPayment,
   handlePaystackWebhook,
   handlePaystackRedirect,
+  verifyPaystackTransaction,
 } from '../controllers/payment.controller.js';
 import { authenticate } from '../middlewares/auth.js';
+import { paymentLimiter } from '../middlewares/rateLimiter.js';
 
 const router = Router();
 
 // Authenticated routes
-router.post('/initiate', authenticate, initiatePayment);
-router.patch('/:id/confirm', authenticate, confirmManualPayment);
+router.post('/initiate', paymentLimiter, initiatePayment);
+router.patch('/:id/confirm', authenticate, paymentLimiter, confirmManualPayment);
 
 // Public routes
-router.post('/webhook', handlePaystackWebhook); // Paystack sends events here
-router.get('/redirect', handlePaystackRedirect); // Paystack redirects users here
+router.post('/webhook', handlePaystackWebhook); 
+router.get('/redirect', handlePaystackRedirect); 
+router.get('/verify/:reference', paymentLimiter, verifyPaystackTransaction);
 
 export default router;

@@ -34,44 +34,64 @@ model Room {
 }
 
 model User {
-  id          String    @id @default(uuid())
-  name        String
-  email       String    @unique
-  phone       String?
-  password    String
-  role        UserRole  @default(GUEST)
+  id                String     @id @default(uuid())
+  name              String
+  email             String     @unique
+  phone             String?
+  password          String?    
+  role              UserRole   @default(GUEST)
 
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  bookings    Booking[]
+  googleId          String?    @unique  
+
+  resetToken        String?    @db.VarChar(64)
+  resetTokenExpiry  DateTime?
+
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  bookings          Booking[]
 }
+
 
 model Booking {
   id          String        @id @default(uuid())
-  userId      String
   roomId      String
   checkIn     DateTime
   checkOut    DateTime
   status      BookingStatus @default(PENDING)
 
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  // Public guest info (for Paystack or walk-in bookings)
+  guestName   String?
+  guestEmail  String?
+  guestPhone  String?
+  bookingReference String? @unique
+  notes           String?
 
-  user        User          @relation(fields: [userId], references: [id])
+  // Optional staff reference (for manual bookings)
+  userId      String?       // Nullable for public bookings
+  user        User?         @relation(fields: [userId], references: [id])
+
   room        Room          @relation(fields: [roomId], references: [id])
   payments    Payment[]
+
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 }
 
 model Payment {
-  id          String        @id @default(uuid())
-  bookingId   String
-  amount      Float
-  currency    String        @default("NGN")
-  paymentDate DateTime      @default(now())
-  method      PaymentMethod
-  status      PaymentStatus @default(SUCCESS)
+  id              String         @id @default(uuid())
+  bookingId       String
+  amount          Float
+  currency        String         @default("NGN")
+  method          PaymentMethod
+  status          PaymentStatus  @default(PENDING)
+  paymentDate     DateTime?      // Set only when payment is successful
+  reference       String?        @unique // Paystack or internal reference
+  guestEmail      String?        // For public bookings
+  expiresAt       DateTime?      // Optional expiry for pending payments
+  createdAt       DateTime       @default(now())
 
-  booking     Booking       @relation(fields: [bookingId], references: [id])
+  booking         Booking        @relation(fields: [bookingId], references: [id])
 }
 
 enum UserRole {

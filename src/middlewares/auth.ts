@@ -1,9 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import prisma from "../prisma/client.js";
+import { User } from "@prisma/client";
 
 interface AuthRequest extends Request {
-  user?: any;
+  user?: User;
 }
 
 // Middleware to check authentication

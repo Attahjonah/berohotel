@@ -1,6 +1,7 @@
 // prisma/seed.ts
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
 
@@ -8,25 +9,33 @@ async function main() {
   console.log('🌱 Seeding database with super admin, room types & rooms...');
 
   // 1️⃣ Create Super Admin
-  const hashedPassword = await bcrypt.hash('Heaven@93.', 10); 
+  const hashedPassword = await bcrypt.hash('Heaven@93.', 10);
+
+  // Generate a random reset token (hex string, 32 bytes → 64 chars)
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const resetTokenExpiry = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24 hours from now
 
   await prisma.user.upsert({
     where: { email: 'attahjonah93@gmail.com' },
     update: {
       phone: '07064599840',
-      role: 'SUPER_ADMIN', 
+      role: 'SUPER_ADMIN',
       password: hashedPassword,
+      resetToken,
+      resetTokenExpiry,
     },
     create: {
       name: 'Super Admin',
       email: 'attahjonah93@gmail.com',
       phone: '07064599840',
-      role: 'SUPER_ADMIN', 
+      role: 'SUPER_ADMIN',
       password: hashedPassword,
+      resetToken,
+      resetTokenExpiry,
     },
   });
 
-  console.log('✅ Super admin created/updated.');
+  console.log('✅ Super admin created/updated with resetToken & expiry.');
 
   // 2️⃣ Seed Room Types & Rooms
   const roomTypes = [
@@ -58,10 +67,10 @@ async function main() {
 
     for (let i = 1; i <= type.numberOfRooms; i++) {
       await prisma.room.upsert({
-        where: { roomNumber: `${type.name}-${i}` },
+        where: { roomName: `${type.name}-${i}` }, 
         update: {},
         create: {
-          roomNumber: `${type.name}-${i}`,
+          roomName: `${type.name}-${i}`,
           roomTypeId: roomType.id,
         },
       });
