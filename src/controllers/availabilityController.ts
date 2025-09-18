@@ -1,20 +1,32 @@
 import { Request, Response, RequestHandler } from "express";
 import prisma from "../config/prisma.js";
-
+import redis from "../utils/redis.js";
 
 export const getAvailableRooms: RequestHandler = async (req, res) => {
   try {
     const { checkIn, checkOut } = req.query;
 
     if (!checkIn || !checkOut) {
-      return res.status(400).json({ error: 'Start and end dates are required' });
+      return res.status(400).json({ error: "Start and end dates are required" });
     }
 
     const start = new Date(checkIn as string);
     const end = new Date(checkOut as string);
 
     if (start >= end) {
-      return res.status(400).json({ error: 'End date must be after start date' });
+      return res
+        .status(400)
+        .json({ error: "End date must be after start date" });
+    }
+
+    // --- CACHE KEY (unique for this checkIn/checkOut range) ---
+    const cacheKey = `availableRooms:${checkIn}:${checkOut}`;
+
+    // --- CHECK CACHE FIRST ---
+    const cachedData = await redis.get(cacheKey);
+    if (cachedData) {
+      console.log("✅ Serving available rooms from cache...");
+      return res.json(JSON.parse(cachedData));
     }
 
     // Normalize date to midnight
@@ -37,7 +49,7 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
     // Get all bookings that overlap with the range
     const overlappingBookings = await prisma.booking.findMany({
       where: {
-        status: 'CONFIRMED',
+        status: "CONFIRMED",
         OR: [
           {
             checkIn: { lte: end },
@@ -60,7 +72,7 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
     }[] = [];
 
     for (const room of allRooms) {
-      const bookings = overlappingBookings.filter(b => b.roomId === room.id);
+      const bookings = overlappingBookings.filter((b) => b.roomId === room.id);
 
       const bookedDatesSet = new Set<number>();
       for (const b of bookings) {
@@ -75,7 +87,7 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
       const freeDates: string[] = [];
 
       for (const d of requestedDates) {
-        const dateStr = new Date(d).toISOString().split('T')[0];
+        const dateStr = new Date(d).toISOString().split("T")[0];
         if (bookedDatesSet.has(d)) {
           bookedDates.push(dateStr);
         } else {
@@ -90,40 +102,19 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
       }
     }
 
-    res.json({
+    const responsePayload = {
       checkIn,
       checkOut,
       fullyAvailable,
       partiallyAvailable,
-    });
+    };
+
+    // --- STORE IN CACHE FOR 5 MINUTES ---
+    await redis.set(cacheKey, JSON.stringify(responsePayload), "EX", 300);
+
+    res.json(responsePayload);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 };
 
-
-// export const getAvailableRooms = async (req: Request, res: Response) => {
-//   try {
-//     const { checkIn, checkOut } = req.query;
-//     const start = new Date(checkIn as string);
-//     const end = new Date(checkOut as string);
-
-//     const availableRooms = await prisma.room.findMany({
-//       where: {
-//         bookings: {
-//           none: {
-//             status: { not: "CANCELLED" },
-//             OR: [
-//               { checkIn: { lte: end }, checkOut: { gte: start } }
-//             ]
-//           }
-//         }
-//       },
-//       include: { roomType: true }
-//     });
-
-//     res.json(availableRooms);
-//   } catch (error) {
-//     res.status(500).json({ message: "Error fetching availability", error });
-//   }
-// };
