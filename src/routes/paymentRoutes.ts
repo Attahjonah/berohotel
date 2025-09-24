@@ -11,11 +11,11 @@ import { paymentLimiter } from '../middlewares/rateLimiter.js';
 
 const router = Router();
 
-// Authenticated routes
-router.post('/initiate', paymentLimiter, initiatePayment);
+// Manual payment routes
+router.post('/initiate', authenticate, paymentLimiter, initiatePayment);
 router.patch('/:id/confirm', authenticate, paymentLimiter, confirmManualPayment);
 
-// Public routes
+// Online payment routes
 router.post('/webhook', handlePaystackWebhook); 
 router.get('/redirect', handlePaystackRedirect); 
 router.get('/verify/:reference', paymentLimiter, verifyPaystackTransaction);

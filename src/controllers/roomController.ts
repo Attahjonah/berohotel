@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import redis from "../utils/redis.js";
+import logger from "../utils/logger.js"; // ✅ Import logger
 
 const prisma = new PrismaClient();
 
@@ -10,11 +11,15 @@ export const createRoom = async (req: Request, res: Response) => {
     const { roomName, roomTypeId, isAvailable } = req.body;
 
     if (!roomName || !roomTypeId) {
+      logger.warn("❌ Missing required fields when creating room", { body: req.body });
       return res.status(400).json({ message: "roomName and roomTypeId are required" });
     }
 
     const roomType = await prisma.roomType.findUnique({ where: { id: roomTypeId } });
-    if (!roomType) return res.status(404).json({ message: "RoomType not found" });
+    if (!roomType) {
+      logger.warn(`❌ RoomType not found for ID: ${roomTypeId}`);
+      return res.status(404).json({ message: "RoomType not found" });
+    }
 
     const room = await prisma.room.create({
       data: { roomName, roomTypeId, isAvailable: isAvailable ?? true },
@@ -25,11 +30,12 @@ export const createRoom = async (req: Request, res: Response) => {
       data: { numberOfRooms: roomType.numberOfRooms + 1 },
     });
 
-    // ❌ Invalidate cache after creation
-    await redis.del("rooms:all");
+    await redis.del("rooms:all"); // Invalidate cache
+    logger.info(`✅ Room created: ${room.id}`, { room });
 
     res.status(201).json(room);
   } catch (error: any) {
+    logger.error("❌ Error creating room", { error: error.message, stack: error.stack });
     res.status(500).json({ message: error.message });
   }
 };
@@ -38,10 +44,10 @@ export const createRoom = async (req: Request, res: Response) => {
 export const getAllRooms = async (req: Request, res: Response) => {
   try {
     const cacheKey = "rooms:all";
-
     const cached = await redis.get(cacheKey);
+
     if (cached) {
-      console.log("✅ Serving rooms from cache");
+      logger.info("✅ Serving rooms from cache");
       return res.json(JSON.parse(cached));
     }
 
@@ -55,9 +61,12 @@ export const getAllRooms = async (req: Request, res: Response) => {
       orderBy: { createdAt: "desc" },
     });
 
-    await redis.set(cacheKey, JSON.stringify(rooms), "EX", 60); // cache for 1 min
+    await redis.set(cacheKey, JSON.stringify(rooms), "EX", 60);
+    logger.info(`✅ Rooms fetched from DB, count: ${rooms.length}`);
+
     res.status(200).json(rooms);
   } catch (error: any) {
+    logger.error("❌ Error fetching all rooms", { error: error.message, stack: error.stack });
     res.status(500).json({ message: error.message });
   }
 };
@@ -70,7 +79,7 @@ export const getRoomById = async (req: Request, res: Response) => {
 
     const cached = await redis.get(cacheKey);
     if (cached) {
-      console.log(`✅ Serving room ${id} from cache`);
+      logger.info(`✅ Serving room ${id} from cache`);
       return res.json(JSON.parse(cached));
     }
 
@@ -79,11 +88,17 @@ export const getRoomById = async (req: Request, res: Response) => {
       include: { roomType: true },
     });
 
-    if (!room) return res.status(404).json({ message: "Room not found" });
+    if (!room) {
+      logger.warn(`❌ Room not found: ${id}`);
+      return res.status(404).json({ message: "Room not found" });
+    }
 
     await redis.set(cacheKey, JSON.stringify(room), "EX", 60);
+    logger.info(`✅ Room fetched from DB: ${id}`);
+
     res.status(200).json(room);
   } catch (error: any) {
+    logger.error("❌ Error fetching room by ID", { error: error.message, stack: error.stack });
     res.status(500).json({ message: error.message });
   }
 };
@@ -95,19 +110,23 @@ export const updateRoom = async (req: Request, res: Response) => {
     const { roomName, roomTypeId, isAvailable } = req.body;
 
     const room = await prisma.room.findUnique({ where: { id } });
-    if (!room) return res.status(404).json({ message: "Room not found" });
+    if (!room) {
+      logger.warn(`❌ Room not found for update: ${id}`);
+      return res.status(404).json({ message: "Room not found" });
+    }
 
     const updatedRoom = await prisma.room.update({
       where: { id },
       data: { roomName, roomTypeId, isAvailable },
     });
 
-    // ❌ Invalidate cache
     await redis.del("rooms:all");
     await redis.del(`room:${id}`);
+    logger.info(`✅ Room updated: ${id}`, { updatedRoom });
 
     res.status(200).json(updatedRoom);
   } catch (error: any) {
+    logger.error("❌ Error updating room", { error: error.message, stack: error.stack });
     res.status(500).json({ message: error.message });
   }
 };
@@ -118,7 +137,10 @@ export const deleteRoom = async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const room = await prisma.room.findUnique({ where: { id } });
-    if (!room) return res.status(404).json({ message: "Room not found" });
+    if (!room) {
+      logger.warn(`❌ Room not found for delete: ${id}`);
+      return res.status(404).json({ message: "Room not found" });
+    }
 
     await prisma.room.delete({ where: { id } });
 
@@ -130,12 +152,13 @@ export const deleteRoom = async (req: Request, res: Response) => {
       });
     }
 
-    // ❌ Invalidate cache
     await redis.del("rooms:all");
     await redis.del(`room:${id}`);
+    logger.info(`✅ Room deleted: ${id}`);
 
     res.status(200).json({ message: "Room deleted successfully" });
   } catch (error: any) {
+    logger.error("❌ Error deleting room", { error: error.message, stack: error.stack });
     res.status(500).json({ message: error.message });
   }
 };

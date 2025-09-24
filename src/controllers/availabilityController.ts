@@ -1,12 +1,14 @@
-import { Request, Response, RequestHandler } from "express";
+import { RequestHandler } from "express";
 import prisma from "../config/prisma.js";
 import redis from "../utils/redis.js";
+import logger from "../utils/logger.js";
 
 export const getAvailableRooms: RequestHandler = async (req, res) => {
   try {
     const { checkIn, checkOut } = req.query;
 
     if (!checkIn || !checkOut) {
+      logger.warn("Missing checkIn or checkOut in query", { query: req.query });
       return res.status(400).json({ error: "Start and end dates are required" });
     }
 
@@ -14,6 +16,7 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
     const end = new Date(checkOut as string);
 
     if (start >= end) {
+      logger.warn("Invalid date range", { checkIn, checkOut });
       return res
         .status(400)
         .json({ error: "End date must be after start date" });
@@ -25,11 +28,11 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
     // --- CHECK CACHE FIRST ---
     const cachedData = await redis.get(cacheKey);
     if (cachedData) {
-      console.log("✅ Serving available rooms from cache...");
+      logger.info("Serving available rooms from cache", { cacheKey });
       return res.json(JSON.parse(cachedData));
     }
 
-    // Normalize date to midnight
+    // Normalize date to midnight UTC
     const normalizeUTC = (date: Date) =>
       Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 
@@ -46,7 +49,7 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
       where: { isAvailable: true },
     });
 
-    // Get all bookings that overlap with the range
+    // Get overlapping bookings
     const overlappingBookings = await prisma.booking.findMany({
       where: {
         status: "CONFIRMED",
@@ -112,9 +115,16 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
     // --- STORE IN CACHE FOR 5 MINUTES ---
     await redis.set(cacheKey, JSON.stringify(responsePayload), "EX", 300);
 
+    logger.info("Available rooms fetched", {
+      checkIn,
+      checkOut,
+      fullyAvailableCount: fullyAvailable.length,
+      partiallyAvailableCount: partiallyAvailable.length,
+    });
+
     res.json(responsePayload);
   } catch (err) {
+    logger.error("Error fetching available rooms", { error: (err as Error).stack });
     res.status(500).json({ error: (err as Error).message });
   }
 };
-
