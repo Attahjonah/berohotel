@@ -12,7 +12,7 @@ async function startServer() {
     console.log('✅ Connected to PostgreSQL Database');
 
     // Start the server
-    app.listen(PORT, () => {
+    app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running at http://localhost:${PORT}`);
     });
   } catch (error) {

@@ -25,7 +25,14 @@ const app: Application = express();
 app.use(globalRateLimiter);
 
 // --- Middleware ---
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+app.use(cors({
+  origin: [
+    "http://localhost:3000",
+    "https://your-ngrok-id.ngrok-free.app"
+  ],
+  credentials: true
+}));
+
 app.use(express.json());
 app.use(helmet());
 app.use(morgan("dev"));
