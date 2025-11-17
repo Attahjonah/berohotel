@@ -7,64 +7,76 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
   try {
     const { checkIn, checkOut } = req.query;
 
-    if (!checkIn || !checkOut) {
-      logger.warn("Missing checkIn or checkOut in query", { query: req.query });
+    if (!checkIn || !checkOut)
       return res.status(400).json({ error: "Start and end dates are required" });
-    }
 
     const start = new Date(checkIn as string);
     const end = new Date(checkOut as string);
+    const now = new Date();
 
-    if (start >= end) {
-      logger.warn("Invalid date range", { checkIn, checkOut });
-      return res
-        .status(400)
-        .json({ error: "End date must be after start date" });
-    }
+    if (start >= end)
+      return res.status(400).json({ error: "End date must be after start date" });
 
-    // --- CACHE KEY (unique for this checkIn/checkOut range) ---
+    // if (start <= now || end <= now)
+    //   return res.status(400).json({ error: "Date must be present or future" });
+
+    const normalizeDate = (d: Date) => {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+};
+
+const today = normalizeDate(now);
+const startDate = normalizeDate(start);
+const endDate = normalizeDate(end);
+
+if (startDate < today || endDate < today) {
+  return res.status(400).json({ error: "Dates must be present or future" });
+}
+
+
     const cacheKey = `availableRooms:${checkIn}:${checkOut}`;
-
-    // --- CHECK CACHE FIRST ---
     const cachedData = await redis.get(cacheKey);
     if (cachedData) {
       logger.info("Serving available rooms from cache", { cacheKey });
       return res.json(JSON.parse(cachedData));
     }
 
-    // Normalize date to midnight UTC
     const normalizeUTC = (date: Date) =>
       Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 
-    // Build requested date range
     const requestedDates: number[] = [];
     let current = new Date(start);
     while (current < end) {
       requestedDates.push(normalizeUTC(current));
-      current.setDate(current.getUTCDate() + 1);
+      current.setUTCDate(current.getUTCDate() + 1);
     }
 
-    // Get all rooms
-    const allRooms = await prisma.room.findMany({
-      where: { isAvailable: true },
-    });
+    // Fetch all rooms along with their room type/category info
+const allRooms = await prisma.room.findMany({
+  where: { isAvailable: true },
+  include: {
+    roomType: {
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        price: true,
+        imageUrl: true,
+      },
+    },
+  },
+});
 
-    // Get overlapping bookings
+
+    // Fetch only bookings that overlap with the requested range
     const overlappingBookings = await prisma.booking.findMany({
       where: {
         status: "CONFIRMED",
-        OR: [
-          {
-            checkIn: { lte: end },
-            checkOut: { gte: start },
-          },
+        AND: [
+          { checkIn: { lt: end } }, // booking starts before user's checkout
+          { checkOut: { gt: start } }, // booking ends after user's checkin
         ],
       },
-      select: {
-        roomId: true,
-        checkIn: true,
-        checkOut: true,
-      },
+      select: { roomId: true, checkIn: true, checkOut: true },
     });
 
     const fullyAvailable: typeof allRooms = [];
@@ -80,7 +92,7 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
       const bookedDatesSet = new Set<number>();
       for (const b of bookings) {
         let d = new Date(b.checkIn);
-        while (normalizeUTC(d) < normalizeUTC(new Date(b.checkOut))) {
+        while (normalizeUTC(d) < normalizeUTC(b.checkOut)) {
           bookedDatesSet.add(normalizeUTC(d));
           d.setUTCDate(d.getUTCDate() + 1);
         }
@@ -112,7 +124,6 @@ export const getAvailableRooms: RequestHandler = async (req, res) => {
       partiallyAvailable,
     };
 
-    // --- STORE IN CACHE FOR 5 MINUTES ---
     await redis.set(cacheKey, JSON.stringify(responsePayload), "EX", 300);
 
     logger.info("Available rooms fetched", {

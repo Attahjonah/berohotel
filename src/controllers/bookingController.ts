@@ -34,9 +34,9 @@ export const createOnlineBooking: RequestHandler = async (req, res) => {
     const checkOutDate = new Date(checkOut);
     const now = new Date();
 
-    if (checkInDate <= now || checkOutDate <= now) {
-      logger.warn("⚠️ Invalid booking dates", { checkInDate, checkOutDate });
-      return res.status(400).json({ error: "Check-in and check-out dates must be in the future" });
+    if ( checkOutDate <= now) {
+      logger.warn("⚠️ Invalid booking dates", { checkOutDate });
+      return res.status(400).json({ error: "Check-out date must be in the future" });
     }
 
     if (checkOutDate <= checkInDate) {
@@ -253,35 +253,34 @@ export const getBookingById: RequestHandler = async (req, res) => {
   }
 };
 
-// GET USER BOOKINGS
-export const getUserBookings: RequestHandler = async (req, res) => {
+// GET ALL BOOKINGS (Admin/Staff)
+export const getAllBookings: RequestHandler = async (req, res) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) {
-      logger.warn("⚠️ Unauthorized user tried to fetch bookings");
-      return res.status(401).json({ error: "Unauthorized" });
+    const role = req.user?.role;
+
+    if (!role || !["SUPER_ADMIN", "ADMIN", "MANAGER"].includes(role)) {
+      return res.status(403).json({ error: "Access denied" });
     }
 
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
 
-    const cacheKey = `userBookings:${userId}:page:${page}:limit:${limit}`;
-
-    const cached = await redis.get(cacheKey);
-    if (cached) {
-      logger.info("📌 Serving user bookings from cache", { userId, page, limit });
-      return res.json(JSON.parse(cached));
-    }
-
-    const total = await prisma.booking.count({ where: { userId } });
+    const total = await prisma.booking.count();
 
     const bookings = await prisma.booking.findMany({
-      where: { userId },
       skip,
       take: limit,
       orderBy: { createdAt: "desc" },
-      include: { room: true },
+      include: {
+        room: {
+          select: {
+            id: true,
+            roomName: true,
+          }
+        },
+        user: true,
+      },
     });
 
     const response = {
@@ -292,13 +291,65 @@ export const getUserBookings: RequestHandler = async (req, res) => {
       bookings,
     };
 
-    await redis.set(cacheKey, JSON.stringify(response), "EX", 300);
-
-    logger.info("✅ User bookings fetched and cached", { userId, page, limit });
-
     res.json(response);
   } catch (err) {
-    logger.error("❌ GetUserBookings Error", { error: (err as Error).message });
-    res.status(500).json({ error: (err as Error).message });
+    logger.error("❌ getAllBookings Error", { error: (err as Error).message });
+    res.status(500).json({ error: "Failed to fetch bookings" });
   }
 };
+
+
+
+
+// // GET USER BOOKINGS
+// export const getUserBookings: RequestHandler = async (req, res) => {
+//   try {
+//     const userId = req.user?.id;
+//     if (!userId) {
+//       logger.warn("⚠️ Unauthorized user tried to fetch bookings");
+//       return res.status(401).json({ error: "Unauthorized" });
+//     }
+
+//     const page = parseInt(req.query.page as string) || 1;
+//     const limit = parseInt(req.query.limit as string) || 10;
+//     const skip = (page - 1) * limit;
+
+//     const cacheKey = `userBookings:${userId}:page:${page}:limit:${limit}`;
+
+//     const cached = await redis.get(cacheKey);
+//     if (cached) {
+//       logger.info("📌 Serving user bookings from cache", { userId, page, limit });
+//       return res.json(JSON.parse(cached));
+//     }
+
+//     const total = await prisma.booking.count({ where: { userId } });
+
+//     const bookings = await prisma.booking.findMany({
+//       where: { userId },
+//       skip,
+//       take: limit,
+//       orderBy: { createdAt: "desc" },
+//       include: { room: true },
+//     });
+ 
+//     const response = {
+//       page,
+//       limit,
+//       total,
+//       totalPages: Math.ceil(total / limit),
+//       bookings,
+//     };
+
+//     await redis.set(cacheKey, JSON.stringify(response), "EX", 300);
+
+//     logger.info("✅ User bookings fetched and cached", { userId, page, limit });
+
+//     res.json(response);
+//   } catch (err) {
+//     logger.error("❌ GetUserBookings Error", { error: (err as Error).message });
+//     res.status(500).json({ error: (err as Error).message });
+//   }
+// };
+
+
+

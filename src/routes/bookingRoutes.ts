@@ -3,7 +3,7 @@ import { createManualBooking,
         createOnlineBooking,
         cancelBooking, 
         getBookingById, 
-        getUserBookings 
+        getAllBookings 
     } from '../controllers/bookingController.js';
 import { authenticate } from '../middlewares/auth.js';
 import { getBookingSummary } from '../controllers/getBookingSummary.js';
@@ -13,7 +13,7 @@ const router = Router();
 
 router.get('/:id/summary', bookingLimiter, getBookingSummary);
 router.get('/:id', bookingLimiter, getBookingById)
-router.get('/', bookingLimiter, authenticate, getUserBookings)
+router.get('/', bookingLimiter, authenticate, getAllBookings)
 router.post('/manual', bookingLimiter, authenticate, createManualBooking);
 router.post('/online', bookingLimiter, createOnlineBooking);
 router.patch('/:id/cancel', bookingLimiter, cancelBooking);

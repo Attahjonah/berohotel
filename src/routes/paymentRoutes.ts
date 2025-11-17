@@ -12,7 +12,7 @@ import { paymentLimiter } from '../middlewares/rateLimiter.js';
 const router = Router();
 
 // Manual payment routes
-router.post('/initiate', authenticate, paymentLimiter, initiatePayment);
+router.post('/initiate', paymentLimiter, initiatePayment);
 router.patch('/:id/confirm', authenticate, paymentLimiter, confirmManualPayment);
 
 // Online payment routes

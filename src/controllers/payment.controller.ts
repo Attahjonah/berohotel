@@ -95,59 +95,6 @@ export const initiatePayment: RequestHandler = async (req, res) => {
 };
 
 
-// 🟢 Confirm Manual Payment
-export const confirmManualPayment: RequestHandler = async (req, res) => {
-  try {
-    const paymentId = req.params.id;
-
-    const payment = await prisma.payment.findUnique({
-      where: { id: paymentId },
-      include: { booking: true },
-    });
-
-    if (!payment || !payment.booking) {
-      return res.status(404).json({ error: 'Payment or booking not found' });
-    }
-
-    if (payment.expiresAt && new Date() > payment.expiresAt) {
-      return res.status(400).json({ error: 'Payment has expired and cannot be confirmed' });
-    }
-
-    const booking = payment.booking;
-
-    const conflictingBooking = await prisma.booking.findFirst({
-      where: {
-        roomId: booking.roomId,
-        status: 'CONFIRMED',
-        OR: [
-          {
-            checkIn: { lte: booking.checkOut },
-            checkOut: { gte: booking.checkIn },
-          },
-        ],
-      },
-    });
-
-    if (conflictingBooking) {
-      return res.status(400).json({ error: 'Room is already booked for selected dates' });
-    }
-
-    const updatedPayment = await prisma.payment.update({
-      where: { id: paymentId },
-      data: { status: 'SUCCESS', paymentDate: new Date() },
-    });
-
-    await prisma.booking.update({
-      where: { id: booking.id },
-      data: { status: 'CONFIRMED' },
-    });
-
-    res.json({ message: 'Manual payment confirmed and booking updated', payment: updatedPayment });
-  } catch (err) {
-    res.status(500).json({ error: (err as Error).message });
-  }
-};
-
 // 🟢 Handle Paystack Webhook
 export const handlePaystackWebhook: RequestHandler = async (req, res) => {
   try {
@@ -212,146 +159,224 @@ export const handlePaystackRedirect: RequestHandler = async (req, res) => {
     const reference = req.query.reference as string;
 
     const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
-      headers: {
-        Authorization: `Bearer ${PAYSTACK_SECRET}`,
-      },
+      headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
     });
 
     const { status, metadata, amount, paid_at } = response.data.data;
 
-    if (status === 'success') {
-      const bookingId = metadata.bookingId;
-
-      // ✅ Update payment record
-      await prisma.payment.update({
-        where: { reference },
-        data: {
-          status: 'SUCCESS',
-          paymentDate: new Date(paid_at),
-          amount: amount / 100, // Convert from kobo to naira
-        },
-      });
-
-      // ✅ Confirm booking
-      await prisma.booking.update({
-        where: { id: bookingId },
-        data: { status: 'CONFIRMED' },
-      });
-
-      res.send(`
-        <h2>✅ Payment Successful!</h2>
-        <p>Reference: ${reference}</p>
-        <p>Booking ID: ${bookingId}</p>
-        <p>Amount Paid: ₦${amount / 100}</p>
-      `);
+    if (status !== "success") {
+  return res.redirect(`${process.env.FRONTEND_URL}/payment-failure`);
+}
 
 
-      const payment = await prisma.payment.findUnique({
-          where: { reference },
-          include: {
-            booking: {
-              include: {
-                room: {
-                  include: { roomType: true },
-                },
-              },
-            },
-          },
-      });
+    const bookingId = metadata.bookingId;
 
-      if (!payment || !payment.booking) {
-        console.error('❌ Failed to fetch payment or booking for receipt');
-        return;
-      }
+    // ✅ Update payment & booking
+    await prisma.payment.updateMany({
+      where: { bookingId, reference },
+      data: {
+        status: 'SUCCESS',
+        paymentDate: new Date(paid_at),
+        amount: amount / 100,
+      },
+    });
 
-    const receiptData = {
-      guestName: payment.booking.guestName,
-      roomType: payment.booking.room.roomType.name,
-      room: payment.booking.room.roomName,
-      checkInDate: payment.booking.checkIn,
-      checkOutDate: payment.booking.checkOut,
-      amount: payment.amount,
-      status: payment.status,
-      reference: payment.reference!,
-      paymentDate: payment.paymentDate!,
-      guestEmail: payment.guestEmail!,
-    };
+    await prisma.booking.update({
+      where: { id: bookingId },
+      data: { status: 'CONFIRMED' },
+    });
+
+    // ✅ Fetch payment & booking info for receipt
+    const payment = await prisma.payment.findUnique({
+      where: { reference },
+      include: {
+        booking: { include: { room: { include: { roomType: true } } } },
+      },
+    });
+
+    if (payment && payment.booking) {
+      const receiptData = {
+        guestName: payment.booking.guestName,
+        roomType: payment.booking.room.roomType.name,
+        room: payment.booking.room.roomName,
+        checkInDate: payment.booking.checkIn,
+        checkOutDate: payment.booking.checkOut,
+        amount: payment.amount,
+        status: payment.status,
+        reference: payment.reference!,
+        paymentDate: payment.paymentDate!,
+        guestEmail: payment.guestEmail!,
+      };
+
       const html = generateReceiptHTML(receiptData);
-
       const browser = await puppeteer.launch();
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdfBuffer = await page.pdf({ format: 'A4' });
+      await page.setContent(html, { waitUntil: "networkidle0" });
+      const pdfBuffer = await page.pdf({ format: "A4" });
       await browser.close();
 
-      await transporter.sendMail({
+      // ✅ Send email in background
+      transporter.sendMail({
         from: `"Bennyrose Hotel" <${process.env.GMAIL_USER}>`,
         to: receiptData.guestEmail,
-        subject: 'Your Booking Receipt – Bennyrose Hotel',
+        subject: "Your Booking Receipt – Bennyrose Hotel",
         html,
         attachments: [
           {
             filename: `receipt-${receiptData.reference}.pdf`,
             content: pdfBuffer,
-            contentType: 'application/pdf',
+            contentType: "application/pdf",
           },
         ],
-      });
-
-
-    } else {
-      res.send(`
-        <h2>❌ Payment Failed or Incomplete</h2>
-        <p>Reference: ${reference}</p>
-      `);
+      }).catch(console.error);
     }
+
+    // ✅ Redirect after triggering the email
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+    return res.redirect(
+      `${FRONTEND_URL}/payment-success?reference=${reference}&bookingId=${bookingId}&amount=${amount / 100}`
+    );
+
   } catch (err) {
+    console.error(err);
     res.status(500).send(`<h2>Error verifying payment</h2><p>${(err as Error).message}</p>`);
   }
 };
 
-
-export const verifyPaystackTransaction: RequestHandler = async (req, res) => {
-  const { reference } = req.params;
-
+// 🟢 Confirm Manual Payment
+export const confirmManualPayment: RequestHandler = async (req, res) => {
   try {
-    // 🔍 Call Paystack's verify endpoint
-    const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
-      headers: {
-        Authorization: `Bearer ${PAYSTACK_SECRET}`,
+    const paymentId = req.params.id;
+
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { booking: true },
+    });
+
+    if (!payment || !payment.booking) {
+      return res.status(404).json({ error: 'Payment or booking not found' });
+    }
+
+    if (payment.expiresAt && new Date() > payment.expiresAt) {
+      return res.status(400).json({ error: 'Payment has expired and cannot be confirmed' });
+    }
+
+    const booking = payment.booking;
+
+    const conflictingBooking = await prisma.booking.findFirst({
+      where: {
+        roomId: booking.roomId,
+        status: 'CONFIRMED',
+        OR: [
+          {
+            checkIn: { lte: booking.checkOut },
+            checkOut: { gte: booking.checkIn },
+          },
+        ],
       },
     });
 
-    const data = response.data;
-
-    if (data.status && data.data.status === 'success') {
-      const { metadata, amount, paid_at } = data.data;
-      const { bookingId } = metadata;
-
-      // ✅ Update payment record
-      await prisma.payment.updateMany({
-        where: { bookingId, method: 'PAYSTACK' },
-        data: {
-          status: 'SUCCESS',
-          paymentDate: new Date(paid_at),
-          amount: amount / 100, // Convert from kobo to naira
-        },
-      });
-
-      // ✅ Confirm booking
-      await prisma.booking.update({
-        where: { id: bookingId },
-        data: { status: 'CONFIRMED' },
-      });
-
-      return res.json({ message: 'Payment verified and booking confirmed' });
+    if (conflictingBooking) {
+      return res.status(400).json({ error: 'Room is already booked for selected dates' });
     }
 
-    res.status(400).json({ error: 'Transaction not successful' });
+    const updatedPayment = await prisma.payment.update({
+      where: { id: paymentId },
+      data: { status: 'SUCCESS', paymentDate: new Date() },
+    });
+
+    await prisma.booking.update({
+      where: { id: booking.id },
+      data: { status: 'CONFIRMED' },
+    });
+
+    res.json({ message: 'Manual payment confirmed and booking updated', payment: updatedPayment });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 };
+
+
+
+
+export const verifyPaystackTransaction = async (req, res) => {
+  try {
+    const { reference } = req.params;
+
+    const payment = await prisma.payment.findUnique({
+      where: { reference },
+      include: {
+        booking: {
+          include: {
+            room: { include: { roomType: true } },
+          },
+        },
+      },
+    });
+
+    if (!payment || !payment.booking)
+      return res.status(404).json({ error: "Booking not found for this payment." });
+
+    res.json({
+      booking: {
+        id: payment.booking.id,
+        bookingReference: payment.booking.bookingReference,
+        guestName: payment.booking.guestName,
+        guestEmail: payment.booking.guestEmail,
+        room: payment.booking.room,
+        totalPrice: payment.amount,
+        checkIn: payment.booking.checkIn,
+        checkOut: payment.booking.checkOut,
+        status: payment.booking.status,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
+// export const verifyPaystackTransaction: RequestHandler = async (req, res) => {
+//   const { reference } = req.params;
+
+//   try {
+//     // 🔍 Call Paystack's verify endpoint
+//     const response = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
+//       headers: {
+//         Authorization: `Bearer ${PAYSTACK_SECRET}`,
+//       },
+//     });
+
+//     const data = response.data;
+
+//     if (data.status && data.data.status === 'success') {
+//       const { metadata, amount, paid_at } = data.data;
+//       const { bookingId } = metadata;
+
+//       // ✅ Update payment record
+//       await prisma.payment.updateMany({
+//         where: { bookingId, method: 'PAYSTACK' },
+//         data: {
+//           status: 'SUCCESS',
+//           paymentDate: new Date(paid_at),
+//           amount: amount / 100, // Convert from kobo to naira
+//         },
+//       });
+
+//       // ✅ Confirm booking
+//       await prisma.booking.update({
+//         where: { id: bookingId },
+//         data: { status: 'CONFIRMED' },
+//       });
+
+//       return res.json({ message: 'Payment verified and booking confirmed' });
+//     }
+
+//     res.status(400).json({ error: 'Transaction not successful' });
+//   } catch (err) {
+//     res.status(500).json({ error: (err as Error).message });
+//   }
+// };
 
 
 // export const adminConfirmPayment: RequestHandler = async (req, res) => {

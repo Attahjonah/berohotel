@@ -119,5 +119,71 @@ export const deleteRoomType = async (req: Request, res: Response) => {
     }
     logger.error("Error deleting room type", error);
     res.status(500).json({ message: "Error deleting room type" });
+    console.error(error);
+  }
+};
+
+// Get Photos for a RoomType (with caching)
+export const getRoomTypePhotos = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const cacheKey = `roomType:${id}:photos`;
+
+    // 1. Check Redis first
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      logger.info(`Serving photos for room type ${id} from cache...`);
+      return res.json(JSON.parse(cached));
+    }
+
+    // 2. Fetch from DB
+    const roomType = await prisma.roomType.findUnique({
+      where: { id },
+      select: { photos: true },
+    });
+
+    if (!roomType) {
+      return res.status(404).json({ message: "Room type not found" });
+    }
+
+    // 3. Cache the result
+    await redis.set(cacheKey, JSON.stringify(roomType.photos), "EX", 3600);
+
+    res.json(roomType.photos);
+  } catch (error) {
+    logger.error("Error fetching room type photos", error);
+    res.status(500).json({ message: "Error fetching room type photos" });
+  }
+};
+
+// Add a new photo to RoomType
+export const addRoomTypePhoto = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { photoUrl } = req.body;
+
+    if (!photoUrl) {
+      return res.status(400).json({ message: "photoUrl is required" });
+    }
+
+    const updatedRoomType = await prisma.roomType.update({
+      where: { id },
+      data: {
+        photos: {
+          push: photoUrl,
+        },
+      },
+    });
+
+    await redis.del(ROOM_TYPES_CACHE_KEY);
+    await redis.del(`roomType:${id}`);
+
+    res.json(updatedRoomType.photos);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      return res.status(404).json({ message: "Room type not found" });
+    }
+    logger.error("Error adding photo to room type", error);
+    res.status(500).json({ message: "Error adding photo to room type" });
   }
 };

@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { downloadReceiptPDF } from "../controllers/receipt.controller.js"
-import router from "./auth.routes.js";
 
-router.get('/download', downloadReceiptPDF);
+const router = Router(); 
+
+router.get('/download/:bookingId', downloadReceiptPDF);
 
 export default router
