@@ -18,6 +18,10 @@ dotenv.config();
 
 const { API_VERSION } = process.env;
 
+// Swagger
+import { swaggerServe, swaggerSetup, specs } from "./config/swagger.js";
+
+
 // Initialize the Express app
 const app: Application = express();
 
@@ -50,6 +54,9 @@ app.use("/api/booking", bookingRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/receipts", receiptRoutes);
 app.use("/api/available", availabilityRoutes);
+
+// Swagger Docs
+app.use("/api-docs", swaggerServe, swaggerSetup(specs));
 
 // --- Health Check ---
 app.get("/", (req: Request, res: Response) => {
