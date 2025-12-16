@@ -1,0 +1,25 @@
+# Node
+node_modules
+npm-debug.log
+yarn.lock
+pnpm-lock.yaml
+
+# Build output
+dist
+build
+
+# Env files (NEVER ship secrets)
+.env
+.env.*
+
+# Git
+.git
+.gitignore
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
